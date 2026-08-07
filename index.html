@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meranie XYZ by BJM</title>
+<style>
+  /* ============================================================
+     NASTAVENIA VZHĽADU
+     ============================================================ */
+  :root {
+    --farba-x: #d32f2f;      /* červená - os X */
+    --farba-y: #2e7d32;      /* zelená  - os Y */
+    --farba-z: #1565c0;      /* modrá   - os Z */
+    --farba-3d: #424242;     /* šedá    - priama vzdialenosť */
+    --farba-pozadie: #fafafa;
+    --farba-panel: #ffffff;
+    --farba-akcent: #005f9e; /* Trimble modrá */
+    --font: "Segoe UI", Roboto, Arial, sans-serif;
+    --pismo-tabulka: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--farba-pozadie); color: #212121; font-size: 13px; padding: 10px; }
+  h1 { font-size: 15px; margin-bottom: 8px; color: var(--farba-akcent); }
+  .stav { padding: 8px 10px; border-radius: 4px; background: #e3f2fd; margin-bottom: 8px; font-size: 12px; min-height: 34px; }
+  .stav.aktivny { background: #fff8e1; border-left: 3px solid #f9a825; }
+  .stav.chyba { background: #ffebee; border-left: 3px solid var(--farba-x); }
+  button { font-family: var(--font); font-size: 12px; padding: 7px 10px; border: 1px solid #bdbdbd; border-radius: 4px; background: #fff; cursor: pointer; margin: 0 4px 6px 0; }
+  button:hover { background: #f0f0f0; }
+  button.primarne { background: var(--farba-akcent); color: #fff; border-color: var(--farba-akcent); }
+  button.primarne:hover { background: #004a7c; }
+  button.primarne.zapnute { background: #f9a825; border-color: #f9a825; color: #212121; }
+  button:disabled { opacity: .5; cursor: default; }
+  table { width: 100%; border-collapse: collapse; background: var(--farba-panel); font-size: var(--pismo-tabulka); margin-top: 6px; }
+  th, td { border: 1px solid #e0e0e0; padding: 4px 6px; text-align: right; white-space: nowrap; }
+  th { background: #eeeeee; position: sticky; top: 0; }
+  td:first-child, th:first-child { text-align: center; }
+  .cx { color: var(--farba-x); font-weight: 600; }
+  .cy { color: var(--farba-y); font-weight: 600; }
+  .cz { color: var(--farba-z); font-weight: 600; }
+  .c3 { color: var(--farba-3d); font-weight: 700; }
+  .mala { font-size: 11px; color: #757575; margin-top: 6px; }
+  .riadok-akcie button { padding: 2px 6px; margin: 0 2px; font-size: 11px; }
+  #tabulkaObal { max-height: 45vh; overflow-y: auto; }
+  details { margin-top: 10px; font-size: 11px; color: #757575; }
+  pre { white-space: pre-wrap; word-break: break-all; background: #f5f5f5; padding: 6px; border-radius: 4px; max-height: 150px; overflow: auto; }
+  .prepinace { margin: 6px 0; font-size: 12px; }
+  .prepinace label { margin-right: 12px; cursor: pointer; }
+</style>
+</head>
+<body>
+  <h1>📐 Meranie XYZ</h1>
+  <div id="stav" class="stav">Pripájam sa na 3D Viewer…</div>
+
+  <div>
+    <button id="btnMerat" class="primarne" disabled>▶ Merať</button>
+    <button id="btnZmazVsetko" disabled>🗑 Zmazať všetky</button>
+    <button id="btnKopiruj" disabled>📋 Kopírovať tabuľku</button>
+  </div>
+
+  <div class="prepinace">
+    <label><input type="checkbox" id="chkJednotkyM"> jednotky v m (inak mm)</label>
+    <label><input type="checkbox" id="chkKresli" checked> kresliť do modelu</label>
+  </div>
+
+  <div id="tabulkaObal">
+    <table id="tabulka">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th class="cx">ΔX</th>
+          <th class="cy">ΔY</th>
+          <th class="cz">ΔZ</th>
+          <th class="c3">3D</th>
+          <th>2D (XY)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="telo"></tbody>
+    </table>
+  </div>
+
+  <p class="mala">
+    Klikni <b>Merať</b>, potom vyber v modeli 2 body (snap na hrany/rohy funguje).
+    Do modelu sa nakreslí priama vzdialenosť + zložky
+    <span class="cx">X</span>/<span class="cy">Y</span>/<span class="cz">Z</span> vo farbách osí.
+    Meranie beží opakovane, vypneš ho opätovným klikom na Merať.
+  </p>
+
+  <details>
+    <summary>Diagnostika (pre ladenie)</summary>
+    <pre id="debug">–</pre>
+  </details>
+
+<script type="module">
+import * as TCW from "https://esm.run/trimble-connect-workspace-api";
+
+/* ============================================================
+   NASTAVENIA
+   ============================================================ */
+const NASTAVENIA = {
+  FARBA_X:  { r: 211, g: 47,  b: 47,  a: 255 },  // červená
+  FARBA_Y:  { r: 46,  g: 125, b: 50,  a: 255 },  // zelená
+  FARBA_Z:  { r: 21,  g: 101, b: 192, a: 255 },  // modrá
+  FARBA_3D: { r: 66,  g: 66,  b: 66,  a: 255 },  // priama - tmavošedá
+  MIN_ZLOZKA_MM: 0.5,     // zložky menšie ako toto sa nekreslia
+  DESATINNE_MM: 0,        // počet desatinných miest pri mm
+  DESATINNE_M: 3,         // počet desatinných miest pri m
+  NAZOV_NASTROJA: "pointPicker" // fallback, ak sa nenájde v TOOLS
+};
+
+/* ============================================================
+   STAV APLIKÁCIE
+   ============================================================ */
+let api = null;
+let meranieAktivne = false;
+let prvyBod = null;                 // {x,y,z} v mm
+let merania = [];                   // {cislo, dx, dy, dz, d3, d2, markupIds:[]}
+let cisloMerania = 0;
+
+const $ = id => document.getElementById(id);
+const stavEl = $("stav"), debugEl = $("debug");
+
+function nastavStav(text, trieda) {
+  stavEl.textContent = text;
+  stavEl.className = "stav" + (trieda ? " " + trieda : "");
+}
+function dbg(obj) {
+  try { debugEl.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 1); } catch(e){}
+}
+
+/* ============================================================
+   PRIPOJENIE NA 3D VIEWER
+   ============================================================ */
+async function pripoj() {
+  try {
+    api = await TCW.connect(window.parent, (event, args) => {
+      if (event === "viewer.onPicked") spracujPick(args);
+    }, 30000);
+    nastavStav("Pripojené. Klikni Merať a vyber 2 body v modeli.");
+    $("btnMerat").disabled = false;
+    $("btnZmazVsetko").disabled = false;
+    $("btnKopiruj").disabled = false;
+    dbg({ TOOLS: TCW.TOOLS, TOOL_SNAP_TYPES: TCW.TOOL_SNAP_TYPES });
+  } catch (e) {
+    nastavStav("Nepodarilo sa pripojiť na 3D Viewer: " + e.message, "chyba");
+  }
+}
+
+/* ============================================================
+   AKTIVÁCIA / DEAKTIVÁCIA VÝBERU BODOV
+   ============================================================ */
+function najdiNastrojPicker() {
+  const tools = Array.isArray(TCW.TOOLS) ? TCW.TOOLS : [];
+  return tools.find(t => /point/i.test(t)) || NASTAVENIA.NAZOV_NASTROJA;
+}
+
+async function zapniMeranie() {
+  const nastroj = najdiNastrojPicker();
+  const snapy = Array.isArray(TCW.TOOL_SNAP_TYPES) ? TCW.TOOL_SNAP_TYPES : undefined;
+  try {
+    if (snapy) {
+      await api.viewer.activateTool(nastroj, { snapping: snapy });
+    } else {
+      await api.viewer.activateTool(nastroj);
+    }
+  } catch (e) {
+    // fallback bez options
+    try { await api.viewer.activateTool(nastroj); }
+    catch (e2) {
+      nastavStav("Nepodarilo sa aktivovať nástroj '" + nastroj + "': " + e2.message, "chyba");
+      dbg({ chyba: e2.message, dostupneTOOLS: TCW.TOOLS });
+      return;
+    }
+  }
+  meranieAktivne = true;
+  prvyBod = null;
+  $("btnMerat").classList.add("zapnute");
+  $("btnMerat").textContent = "⏹ Ukončiť meranie";
+  nastavStav("Meranie aktívne – vyber PRVÝ bod v modeli.", "aktivny");
+}
+
+async function vypniMeranie() {
+  try { await api.viewer.activateTool("reset"); } catch(e){}
+  meranieAktivne = false;
+  prvyBod = null;
+  $("btnMerat").classList.remove("zapnute");
+  $("btnMerat").textContent = "▶ Merať";
+  nastavStav("Meranie ukončené.");
+}
+
+$("btnMerat").onclick = () => meranieAktivne ? vypniMeranie() : zapniMeranie();
+
+/* ============================================================
+   SPRACOVANIE VYBRANÉHO BODU
+   ============================================================ */
+function extrahujBod(args) {
+  // Podporí viac tvarov payloadu (data pole / objekt, positionX vs position.x)
+  let d = args && (args.data ?? args);
+  if (Array.isArray(d)) d = d[d.length - 1];
+  if (!d) return null;
+  if (typeof d.positionX === "number")
+    return { x: d.positionX, y: d.positionY, z: d.positionZ };
+  if (d.position && typeof d.position.x === "number")
+    return { x: d.position.x, y: d.position.y, z: d.position.z };
+  if (d.point && typeof d.point.x === "number")
+    return { x: d.point.x, y: d.point.y, z: d.point.z };
+  return null;
+}
+
+async function spracujPick(args) {
+  if (!meranieAktivne) return;
+  const bod = extrahujBod(args);
+  if (!bod) { dbg({ neznamyPayload: args }); return; }
+
+  if (!prvyBod) {
+    prvyBod = bod;
+    nastavStav("Bod 1: [" + fmt(bod.x) + "; " + fmt(bod.y) + "; " + fmt(bod.z) + "] – vyber DRUHÝ bod.", "aktivny");
+    return;
+  }
+
+  const A = prvyBod, B = bod;
+  prvyBod = null;
+
+  const dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z;
+  const d3 = Math.sqrt(dx*dx + dy*dy + dz*dz);
+  const d2 = Math.sqrt(dx*dx + dy*dy);
+
+  cisloMerania++;
+  const zaznam = { cislo: cisloMerania, dx, dy, dz, d3, d2, markupIds: [] };
+
+  if ($("chkKresli").checked) {
+    try { zaznam.markupIds = await nakresliMarkupy(A, B, dx, dy, dz); }
+    catch (e) { dbg({ markupChyba: e.message }); }
+  }
+
+  merania.push(zaznam);
+  vykresliTabulku();
+  nastavStav("Meranie #" + cisloMerania + " hotové. Vyber PRVÝ bod ďalšieho merania.", "aktivny");
+}
+
+/* ============================================================
+   KRESLENIE DO MODELU
+   Priama čiara A→B (šedá) + rozklad po osiach:
+   A → P1 (posun v X, červená) → P2 (posun v Y, zelená) → B (posun v Z, modrá)
+   Každý MeasurementMarkup zobrazí bublinku s dĺžkou automaticky.
+   ============================================================ */
+function pick(p) {
+  return { positionX: p.x, positionY: p.y, positionZ: p.z, type: "point" };
+}
+function mm(a, b, farba) {
+  return {
+    start: pick(a), end: pick(b),
+    mainLineStart: pick(a), mainLineEnd: pick(b),
+    color: farba
+  };
+}
+
+async function nakresliMarkupy(A, B, dx, dy, dz) {
+  const N = NASTAVENIA;
+  const P1 = { x: A.x + dx, y: A.y,      z: A.z };
+  const P2 = { x: A.x + dx, y: A.y + dy, z: A.z };
+
+  const zoznam = [ mm(A, B, N.FARBA_3D) ]; // priama vzdialenosť
+  if (Math.abs(dx) > N.MIN_ZLOZKA_MM) zoznam.push(mm(A,  P1, N.FARBA_X));
+  if (Math.abs(dy) > N.MIN_ZLOZKA_MM) zoznam.push(mm(P1, P2, N.FARBA_Y));
+  if (Math.abs(dz) > N.MIN_ZLOZKA_MM) zoznam.push(mm(P2, B,  N.FARBA_Z));
+
+  const vysledok = await api.markup.addMeasurementMarkups(zoznam);
+  return (vysledok || []).map(m => m.id).filter(id => id !== undefined);
+}
+
+/* ============================================================
+   TABUĽKA + AKCIE
+   ============================================================ */
+function fmt(hodnotaMM) {
+  if ($("chkJednotkyM").checked)
+    return (hodnotaMM / 1000).toFixed(NASTAVENIA.DESATINNE_M);
+  return hodnotaMM.toFixed(NASTAVENIA.DESATINNE_MM);
+}
+
+function vykresliTabulku() {
+  const telo = $("telo");
+  telo.innerHTML = "";
+  for (const m of merania) {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      "<td>" + m.cislo + "</td>" +
+      "<td class='cx'>" + fmt(Math.abs(m.dx)) + "</td>" +
+      "<td class='cy'>" + fmt(Math.abs(m.dy)) + "</td>" +
+      "<td class='cz'>" + fmt(Math.abs(m.dz)) + "</td>" +
+      "<td class='c3'>" + fmt(m.d3) + "</td>" +
+      "<td>" + fmt(m.d2) + "</td>" +
+      "<td class='riadok-akcie'><button title='Zmazať meranie'>✕</button></td>";
+    tr.querySelector("button").onclick = () => zmazMeranie(m);
+    telo.appendChild(tr);
+  }
+}
+$("chkJednotkyM").onchange = vykresliTabulku;
+
+async function zmazMeranie(m) {
+  if (m.markupIds.length) {
+    try { await api.markup.removeMarkups(m.markupIds); } catch(e){}
+  }
+  merania = merania.filter(x => x !== m);
+  vykresliTabulku();
+}
+
+$("btnZmazVsetko").onclick = async () => {
+  const vsetkyIds = merania.flatMap(m => m.markupIds);
+  if (vsetkyIds.length) {
+    try { await api.markup.removeMarkups(vsetkyIds); } catch(e){}
+  }
+  merania = [];
+  vykresliTabulku();
+  nastavStav("Všetky merania zmazané.");
+};
+
+$("btnKopiruj").onclick = () => {
+  const j = $("chkJednotkyM").checked ? "m" : "mm";
+  let text = "#\tdX [" + j + "]\tdY [" + j + "]\tdZ [" + j + "]\t3D [" + j + "]\t2D-XY [" + j + "]\n";
+  for (const m of merania) {
+    text += [m.cislo, fmt(Math.abs(m.dx)), fmt(Math.abs(m.dy)),
+             fmt(Math.abs(m.dz)), fmt(m.d3), fmt(m.d2)].join("\t") + "\n";
+  }
+  navigator.clipboard.writeText(text)
+    .then(() => nastavStav("Tabuľka skopírovaná do schránky (vložíš rovno do Excelu)."))
+    .catch(() => nastavStav("Kopírovanie zlyhalo – skopíruj tabuľku ručne.", "chyba"));
+};
+
+/* ============================================================
+   ŠTART
+   ============================================================ */
+pripoj();
+</script>
+</body>
+</html>
