@@ -81,10 +81,11 @@
 
   <p class="mala">
     Klikni <b>Merať</b> – aktivuje sa klasický merací nástroj Trimble Connectu.
-    Odmeraj vzdialenosť medzi 2 bodmi ako obvykle; do tabuľky automaticky pribudnú
-    absolútne hodnoty <span class="cx">|ΔX|</span>, <span class="cy">|ΔY|</span>,
-    <span class="cz">|ΔZ|</span>, priama 3D vzdialenosť a 2D vzdialenosť v pôdoryse.
-    Voliteľne sa zložky dokreslia aj do modelu vo farbách osí.
+    Odmeraj vzdialenosť medzi 2 bodmi ako obvykle; chvíľu po dokončení merania
+    pribudnú do tabuľky absolútne hodnoty <span class="cx">|ΔX|</span>,
+    <span class="cy">|ΔY|</span>, <span class="cz">|ΔZ|</span>, priama 3D
+    vzdialenosť a 2D vzdialenosť v pôdoryse. Voliteľne sa zložky dokreslia
+    aj do modelu vo farbách osí.
   </p>
 
   <details>
@@ -98,19 +99,23 @@ import * as TCW from "https://esm.run/trimble-connect-workspace-api";
 /* ============================================================
    NASTAVENIA
    ============================================================
-   POZOR NA JEDNOTKY: viewer za behu pracuje s METRAMI
-   (dokumentácia uvádza mm, realita je m). Všetky interné
-   výpočty sú v metroch, prepočet na mm robí až fmt().
+   JEDNOTKY: markup API (getMeasurementMarkups / addMeasurementMarkups)
+   pracuje v MILIMETROCH. Všetky interné výpočty sú v mm,
+   prepočet na metre robí až fmt().
    ============================================================ */
 const NASTAVENIA = {
   FARBA_X:  { r: 211, g: 47,  b: 47,  a: 255 },  // červená
   FARBA_Y:  { r: 46,  g: 125, b: 50,  a: 255 },  // zelená
   FARBA_Z:  { r: 21,  g: 101, b: 192, a: 255 },  // modrá
-  MIN_ZLOZKA_M: 0.001,        // zložky menšie ako 1 mm sa nekreslia
+  MIN_ZLOZKA_MM: 0.5,          // zložky menšie ako 0,5 mm sa nekreslia
   DESATINNE_MM: 0,
   DESATINNE_M: 3,
   NAZVY_MERACIEHO_NASTROJA: ["measure", "measurement", "measureDistance"],
-  INTERVAL_KONTROLY_MS: 800   // záložná kontrola nových meraní (polling)
+  INTERVAL_KONTROLY_MS: 500,   // ako často kontrolovať merania
+  STABILNE_KONTROLY: 3         // koľko kontrol po sebe musia byť body nemenné
+                               // (3 x 500 ms = meranie sa zapíše ~1,5 s po
+                               //  druhom kliku; chráni pred zachytením
+                               //  rozpracovaného merania s gumovou čiarou)
 };
 
 /* ============================================================
@@ -120,7 +125,8 @@ let api = null;
 let meranieAktivne = false;
 let merania = [];              // {cislo, dx, dy, dz, d3, d2, hlavnyId, zlozkyIds:[]}
 let cisloMerania = 0;
-let znameIds = new Set();      // id všetkých už spracovaných/nami vytvorených markupov
+let znameIds = new Set();      // spracované + nami vytvorené markupy
+let cakajuce = new Map();      // id -> {podpis, stabilnych}
 let spracovavam = false;
 let pollTimer = null;
 
@@ -141,10 +147,10 @@ function dbg(obj) {
 async function pripoj() {
   try {
     api = await TCW.connect(window.parent, (event, args) => {
-      if (event === "viewer.onMarkupChanged") skontrolujNoveMerania();
+      if (event === "viewer.onMarkupChanged") skontrolujMerania();
     }, 30000);
 
-    // zapamätaj si existujúce merania v modeli, aby sme ich nespracovali
+    // existujúce merania v modeli preskočiť
     try {
       const existujuce = await api.markup.getMeasurementMarkups();
       (existujuce || []).forEach(m => { if (m.id !== undefined) znameIds.add(m.id); });
@@ -181,19 +187,21 @@ async function zapniMeranie() {
     nastavStav("Nepodarilo sa aktivovať merací nástroj (" + posl + "). Aktivuj meranie ručne z lišty Viewera – tabuľka bude fungovať aj tak.", "chyba");
     dbg({ dostupneTOOLS: TCW.TOOLS, poslednaChyba: posl });
   } else {
-    nastavStav("Meranie aktívne (" + posl + ") – odmeraj 2 body v modeli.", "aktivny");
+    nastavStav("Meranie aktívne – odmeraj 2 body v modeli.", "aktivny");
   }
   meranieAktivne = true;
   $("btnMerat").classList.add("zapnute");
   $("btnMerat").textContent = "⏹ Ukončiť meranie";
-  // záložný polling – keby event onMarkupChanged neprišiel
-  if (!pollTimer) pollTimer = setInterval(skontrolujNoveMerania, NASTAVENIA.INTERVAL_KONTROLY_MS);
+  if (!pollTimer) pollTimer = setInterval(skontrolujMerania, NASTAVENIA.INTERVAL_KONTROLY_MS);
 }
 
 async function vypniMeranie() {
   try { await api.viewer.activateTool("reset"); } catch(e){}
   meranieAktivne = false;
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  // polling nechať bežať ešte chvíľu, nech sa stihne zapísať posledné meranie
+  setTimeout(() => {
+    if (!meranieAktivne && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }, (NASTAVENIA.STABILNE_KONTROLY + 2) * NASTAVENIA.INTERVAL_KONTROLY_MS);
   $("btnMerat").classList.remove("zapnute");
   $("btnMerat").textContent = "▶ Merať";
   nastavStav("Meranie ukončené. Tabuľka a merania v modeli zostávajú.");
@@ -202,21 +210,53 @@ async function vypniMeranie() {
 $("btnMerat").onclick = () => meranieAktivne ? vypniMeranie() : zapniMeranie();
 
 /* ============================================================
-   DETEKCIA NOVÝCH MERANÍ (vytvorených natívnym nástrojom)
+   DETEKCIA HOTOVÝCH MERANÍ SO STABILIZÁCIOU
+   Natívny nástroj vytvorí markup už po 1. kliku (gumová čiara),
+   preto meranie spracujeme až keď sa jeho koncové body
+   STABILNE_KONTROLY krát po sebe nezmenili.
    ============================================================ */
 function bod(pick) {
   return { x: pick.positionX, y: pick.positionY, z: pick.positionZ };
 }
+function podpisMerania(m) {
+  const s = m.mainLineStart || m.start, e = m.mainLineEnd || m.end;
+  if (!s || !e || typeof s.positionX !== "number") return null;
+  const z = n => n.toFixed(1);
+  return [z(s.positionX), z(s.positionY), z(s.positionZ),
+          z(e.positionX), z(e.positionY), z(e.positionZ)].join("|");
+}
 
-async function skontrolujNoveMerania() {
+async function skontrolujMerania() {
   if (spracovavam || !api) return;
   spracovavam = true;
   try {
     const vsetky = await api.markup.getMeasurementMarkups();
+    const aktualneIds = new Set();
+
     for (const m of (vsetky || [])) {
       if (m.id === undefined || znameIds.has(m.id)) continue;
-      znameIds.add(m.id);
-      await spracujMeranie(m);
+      aktualneIds.add(m.id);
+
+      const podpis = podpisMerania(m);
+      if (!podpis) continue;
+
+      const zaznam = cakajuce.get(m.id);
+      if (!zaznam || zaznam.podpis !== podpis) {
+        // nové alebo sa ešte hýbe (gumová čiara) -> resetni počítadlo
+        cakajuce.set(m.id, { podpis, stabilnych: 0 });
+      } else {
+        zaznam.stabilnych++;
+        if (zaznam.stabilnych >= NASTAVENIA.STABILNE_KONTROLY) {
+          znameIds.add(m.id);
+          cakajuce.delete(m.id);
+          await spracujMeranie(m);
+        }
+      }
+    }
+
+    // upratanie: čakajúce merania, ktoré už v modeli nie sú (užívateľ zrušil Esc)
+    for (const id of [...cakajuce.keys()]) {
+      if (!aktualneIds.has(id)) cakajuce.delete(id);
     }
   } catch (e) {
     dbg({ chybaKontroly: e.message });
@@ -226,12 +266,11 @@ async function skontrolujNoveMerania() {
 }
 
 async function spracujMeranie(m) {
-  // koncové body meranej vzdialenosti = mainLineStart/mainLineEnd
   const s = m.mainLineStart || m.start;
   const e = m.mainLineEnd || m.end;
-  if (!s || !e || typeof s.positionX !== "number") { dbg({ neznamyMarkup: m }); return; }
-
   const A = bod(s), B = bod(e);
+
+  // hodnoty v mm
   const dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z;
   const d3 = Math.sqrt(dx*dx + dy*dy + dz*dz);
   const d2 = Math.sqrt(dx*dx + dy*dy);
@@ -250,13 +289,13 @@ async function spracujMeranie(m) {
 }
 
 /* ============================================================
-   VOLITEĽNÉ KRESLENIE X/Y/Z ZLOŽIEK
+   VOLITEĽNÉ KRESLENIE X/Y/Z ZLOŽIEK (mm)
    "schodík": A → P1 (X, červená) → P2 (Y, zelená) → B (Z, modrá)
    ============================================================ */
 function pick(p) {
   return { positionX: p.x, positionY: p.y, positionZ: p.z, type: "point" };
 }
-function mm(a, b, farba) {
+function mmk(a, b, farba) {
   return { start: pick(a), end: pick(b), mainLineStart: pick(a), mainLineEnd: pick(b), color: farba };
 }
 
@@ -266,24 +305,24 @@ async function nakresliZlozky(A, B, dx, dy, dz) {
   const P2 = { x: A.x + dx, y: A.y + dy, z: A.z };
 
   const zoznam = [];
-  if (Math.abs(dx) > N.MIN_ZLOZKA_M) zoznam.push(mm(A,  P1, N.FARBA_X));
-  if (Math.abs(dy) > N.MIN_ZLOZKA_M) zoznam.push(mm(P1, P2, N.FARBA_Y));
-  if (Math.abs(dz) > N.MIN_ZLOZKA_M) zoznam.push(mm(P2, B,  N.FARBA_Z));
+  if (Math.abs(dx) > N.MIN_ZLOZKA_MM) zoznam.push(mmk(A,  P1, N.FARBA_X));
+  if (Math.abs(dy) > N.MIN_ZLOZKA_MM) zoznam.push(mmk(P1, P2, N.FARBA_Y));
+  if (Math.abs(dz) > N.MIN_ZLOZKA_MM) zoznam.push(mmk(P2, B,  N.FARBA_Z));
   if (!zoznam.length) return [];
 
   const vysledok = await api.markup.addMeasurementMarkups(zoznam);
   const ids = (vysledok || []).map(x => x.id).filter(id => id !== undefined);
-  ids.forEach(id => znameIds.add(id));   // vlastné zložky nespracúvať ako nové merania
+  ids.forEach(id => znameIds.add(id));   // vlastné zložky nebrať ako nové merania
   return ids;
 }
 
 /* ============================================================
-   TABUĽKA + AKCIE (interné hodnoty v METROCH)
+   TABUĽKA + AKCIE (interné hodnoty v MILIMETROCH)
    ============================================================ */
-function fmt(hodnotaM) {
+function fmt(hodnotaMM) {
   if ($("chkJednotkyM").checked)
-    return hodnotaM.toFixed(NASTAVENIA.DESATINNE_M);
-  return (hodnotaM * 1000).toFixed(NASTAVENIA.DESATINNE_MM);
+    return (hodnotaMM / 1000).toFixed(NASTAVENIA.DESATINNE_M);
+  return hodnotaMM.toFixed(NASTAVENIA.DESATINNE_MM);
 }
 
 function vykresliTabulku() {
