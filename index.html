@@ -40,11 +40,11 @@
   .c3 { font-weight: 700; }
   .mala { font-size: 11px; color: #757575; margin-top: 6px; }
   .riadok-akcie button { padding: 2px 6px; margin: 0 2px; font-size: 11px; }
-  #tabulkaObal { max-height: 42vh; overflow-y: auto; }
+  #tabulkaObal { max-height: 40vh; overflow-y: auto; }
   details { margin-top: 10px; font-size: 11px; color: #757575; }
   pre { white-space: pre-wrap; word-break: break-all; background: #f5f5f5; padding: 6px; border-radius: 4px; max-height: 150px; overflow: auto; }
   .prepinace { margin: 6px 0; font-size: 12px; }
-  .prepinace label { margin-right: 10px; cursor: pointer; display: inline-block; }
+  .prepinace label { margin-right: 10px; cursor: pointer; display: inline-block; margin-bottom: 4px; }
   fieldset.snap { border: 1px solid #e0e0e0; border-radius: 4px; padding: 6px 8px; margin: 6px 0; font-size: 12px; }
   fieldset.snap legend { font-size: 11px; color: #757575; padding: 0 4px; }
   fieldset.snap label { margin-right: 10px; cursor: pointer; }
@@ -61,16 +61,17 @@
   </div>
 
   <fieldset class="snap">
-    <legend>Snap</legend>
-    <label><input type="checkbox" id="snapBody" checked> body</label>
+    <legend>Snap (na čo sa kurzor chytá)</legend>
+    <label><input type="checkbox" id="snapBody" checked> body/rohy</label>
     <label><input type="checkbox" id="snapHrany" checked> hrany</label>
     <label><input type="checkbox" id="snapPlochy" checked> plochy</label>
-    <label><input type="checkbox" id="snapStredy" checked> stredy</label>
   </fieldset>
 
   <div class="prepinace">
-    <label><input type="checkbox" id="chkJednotkyM"> jednotky v m (inak mm)</label>
+    <label><input type="checkbox" id="chkKontinualne" checked> kontinuálne meranie</label>
     <label><input type="checkbox" id="chkZlozky" checked> kresliť X/Y/Z zložky</label>
+    <label><input type="checkbox" id="chkPopisky" checked> trvalé popisky hodnôt</label>
+    <label><input type="checkbox" id="chkJednotkyM"> jednotky v m (inak mm)</label>
   </div>
 
   <div id="tabulkaObal">
@@ -91,11 +92,11 @@
   </div>
 
   <p class="mala">
-    Klikni <b>Merať</b> a vyber v modeli 2 body – meranie sa vytvorí okamžite
-    po druhom kliku: klasická kóta + voliteľne zložky
-    <span class="cx">X</span>/<span class="cy">Y</span>/<span class="cz">Z</span>
-    vo farbách osí. Snap prepínače hore určujú, na čo sa kurzor chytá.
-    Meranie beží opakovane, vypneš ho tlačidlom.
+    Klikni <b>Merať</b> a vyber 2 body – meranie sa vytvorí okamžite po druhom
+    kliku: klasická kóta + zložky <span class="cx">X</span>/<span class="cy">Y</span>/<span class="cz">Z</span>
+    vo farbách osí. <b>Trvalé popisky</b> = textové štítky s hodnotami, ktoré
+    nemiznú pri otáčaní kamery (kóty si viewer pri niektorých uhloch skrýva sám).
+    Pri vypnutom <b>kontinuálnom meraní</b> sa po jednom meraní funkcia sama ukončí.
   </p>
 
   <details>
@@ -109,21 +110,23 @@ import * as TCW from "https://esm.run/trimble-connect-workspace-api";
 /* ============================================================
    NASTAVENIA
    ============================================================
-   JEDNOTKY: pick event vracia súradnice v METROCH,
-   markup API pracuje v MILIMETROCH -> PREVOD_PICK_NA_MM.
-   Ak by sa v budúcej verzii Viewera jednotky zjednotili,
-   stačí zmeniť túto konštantu na 1.
+   JEDNOTKY: pick event vracia METRE, markup API MILIMETRE.
+   Overené hodnoty z knižnice v0.3.34:
+     TOOLS obsahuje "picking" (výber bodov)
+     TOOL_SNAP_TYPES = ["edge","point","surface"]
+     ToolOptions = { snapTypes: string[], instruction: {title,text} }
    ============================================================ */
 const NASTAVENIA = {
-  FARBA_X:    { r: 211, g: 47,  b: 47,  a: 255 },  // červená
-  FARBA_Y:    { r: 46,  g: 125, b: 50,  a: 255 },  // zelená
-  FARBA_Z:    { r: 21,  g: 101, b: 192, a: 255 },  // modrá
-  FARBA_HLAVNA: null,          // null = predvolená farba Viewera (klasický vzhľad)
-  PREVOD_PICK_NA_MM: 1000,     // pick event (m) -> markup (mm)
-  MIN_ZLOZKA_MM: 0.5,          // zložky menšie ako 0,5 mm sa nekreslia
+  FARBA_X:      { r: 211, g: 47,  b: 47,  a: 255 },  // červená
+  FARBA_Y:      { r: 46,  g: 125, b: 50,  a: 255 },  // zelená
+  FARBA_Z:      { r: 21,  g: 101, b: 192, a: 255 },  // modrá
+  FARBA_HLAVNA: null,           // null = predvolená farba Viewera
+  PREVOD_PICK_NA_MM: 1000,      // pick event (m) -> mm
+  MIN_ZLOZKA_MM: 0.5,           // kratšie zložky sa nekreslia
   DESATINNE_MM: 0,
   DESATINNE_M: 3,
-  NAZOV_NASTROJA: "pointPicker"
+  NAZOV_NASTROJA: "picking",
+  POPISOK_ODSADENIE_MM: 150     // odsadenie textového popisku od stredu čiary
 };
 
 /* ============================================================
@@ -131,10 +134,10 @@ const NASTAVENIA = {
    ============================================================ */
 let api = null;
 let meranieAktivne = false;
-let prvyBod = null;            // {x,y,z} v mm
-let merania = [];              // {cislo, dx, dy, dz, d3, d2, markupIds:[]}
+let prvyBod = null;             // {x,y,z} v mm
+let merania = [];               // {cislo, dx, dy, dz, d3, d2, markupIds:[]}
 let cisloMerania = 0;
-let znameBodoveIds = new Set();// existujúce point markupy (štítky pickera nemazať cudzie)
+let znameBodoveIds = new Set();
 
 const $ = id => document.getElementById(id);
 const stavEl = $("stav"), debugEl = $("debug");
@@ -176,45 +179,46 @@ async function zapamatajBodoveMarkupy() {
 }
 
 /* ============================================================
-   SNAP PREPÍNAČE
-   Mapovanie checkboxov na TOOL_SNAP_TYPES cez regex,
-   aby sme nezáviseli od presných názvov vo verzii API.
+   SNAP – mapovanie checkboxov na skutočné hodnoty API
+   ("point", "edge", "surface"; "stred" v API neexistuje)
    ============================================================ */
 function vyberSnapy() {
-  const dostupne = Array.isArray(TCW.TOOL_SNAP_TYPES) ? TCW.TOOL_SNAP_TYPES : [];
   const chcem = [];
-  const pridaj = rx => dostupne.filter(s => rx.test(s)).forEach(s => chcem.push(s));
-  if ($("snapBody").checked)   pridaj(/point|vertex|corner/i);
-  if ($("snapHrany").checked)  pridaj(/line|edge|segment/i);
-  if ($("snapPlochy").checked) pridaj(/face|plane|surface/i);
-  if ($("snapStredy").checked) pridaj(/center|centre|middle|mid/i);
-  return [...new Set(chcem)];
+  if ($("snapBody").checked)   chcem.push("point");
+  if ($("snapHrany").checked)  chcem.push("edge");
+  if ($("snapPlochy").checked) chcem.push("surface");
+  return chcem;
 }
 
-// zmena snapu počas aktívneho merania -> reaktivuj nástroj s novým snapom
-["snapBody","snapHrany","snapPlochy","snapStredy"].forEach(id => {
-  $(id).onchange = () => { if (meranieAktivne) aktivujNastroj(); };
+["snapBody","snapHrany","snapPlochy"].forEach(id => {
+  $(id).onchange = async () => {
+    if (!meranieAktivne) return;
+    prvyBod = null;                      // reaktivácia zruší rozpracovaný výber
+    await aktivujNastroj();
+    nastavStav("Snap zmenený – vyber PRVÝ bod.", "aktivny");
+  };
 });
 
 /* ============================================================
    AKTIVÁCIA / DEAKTIVÁCIA VÝBERU BODOV
    ============================================================ */
-function najdiNastrojPicker() {
-  const tools = Array.isArray(TCW.TOOLS) ? TCW.TOOLS : [];
-  return tools.find(t => /point/i.test(t)) || NASTAVENIA.NAZOV_NASTROJA;
-}
-
 async function aktivujNastroj() {
-  const nastroj = najdiNastrojPicker();
   const snapy = vyberSnapy();
+  if (!snapy.length) {
+    nastavStav("Zapni aspoň jeden snap typ.", "chyba");
+    return false;
+  }
+  const options = {
+    snapTypes: snapy,
+    instruction: { title: "Meranie XYZ", text: "Vyber 2 body merania" }
+  };
   try {
-    if (snapy.length) await api.viewer.activateTool(nastroj, { snapping: snapy });
-    else              await api.viewer.activateTool(nastroj);
+    await api.viewer.activateTool(NASTAVENIA.NAZOV_NASTROJA, options);
     return true;
   } catch (e) {
-    try { await api.viewer.activateTool(nastroj); return true; }
+    try { await api.viewer.activateTool(NASTAVENIA.NAZOV_NASTROJA); return true; }
     catch (e2) {
-      nastavStav("Nepodarilo sa aktivovať nástroj '" + nastroj + "': " + e2.message, "chyba");
+      nastavStav("Nepodarilo sa aktivovať nástroj 'picking': " + e2.message, "chyba");
       dbg({ chyba: e2.message, dostupneTOOLS: TCW.TOOLS });
       return false;
     }
@@ -231,14 +235,14 @@ async function zapniMeranie() {
   nastavStav("Meranie aktívne – vyber PRVÝ bod v modeli.", "aktivny");
 }
 
-async function vypniMeranie() {
+async function vypniMeranie(text) {
   try { await api.viewer.activateTool("reset"); } catch(e){}
   meranieAktivne = false;
   prvyBod = null;
   await zmazNoveBodoveStitky();
   $("btnMerat").classList.remove("zapnute");
   $("btnMerat").textContent = "▶ Merať";
-  nastavStav("Meranie ukončené.");
+  nastavStav(text || "Meranie ukončené.");
 }
 
 $("btnMerat").onclick = () => meranieAktivne ? vypniMeranie() : zapniMeranie();
@@ -285,21 +289,26 @@ async function spracujPick(args) {
   cisloMerania++;
   const zaznam = { cislo: cisloMerania, dx, dy, dz, d3, d2, markupIds: [] };
 
-  try { zaznam.markupIds = await nakresliMarkupy(A, B, dx, dy, dz); }
+  try { zaznam.markupIds = await nakresliMarkupy(A, B, dx, dy, dz, d3); }
   catch (e) { dbg({ markupChyba: e.message }); }
 
-  // uprac bodové štítky pickera (X/Y/Z bublinky pri vybraných bodoch)
   await zmazNoveBodoveStitky();
 
   merania.push(zaznam);
   vykresliTabulku();
-  nastavStav("Meranie #" + cisloMerania + " hotové. Vyber PRVÝ bod ďalšieho merania.", "aktivny");
+
+  if ($("chkKontinualne").checked) {
+    nastavStav("Meranie #" + cisloMerania + " hotové. Vyber PRVÝ bod ďalšieho merania.", "aktivny");
+  } else {
+    await vypniMeranie("Meranie #" + cisloMerania + " hotové. Funkcia ukončená.");
+  }
 }
 
 /* ============================================================
    KRESLENIE DO MODELU (mm)
-   Hlavná kóta A→B (klasický vzhľad) + voliteľný "schodík":
-   A → P1 (X, červená) → P2 (Y, zelená) → B (Z, modrá)
+   Hlavná kóta A→B + "schodík" zložiek + trvalé textové popisky.
+   Textové popisky (addTextMarkup) viewer neskrýva pri otáčaní
+   kamery, na rozdiel od kót, ktoré si robí declutter.
    ============================================================ */
 function pickMM(p) {
   return { positionX: p.x, positionY: p.y, positionZ: p.z, type: "point" };
@@ -309,28 +318,55 @@ function meracik(a, b, farba) {
   if (farba) m.color = farba;
   return m;
 }
+function stred(a, b) {
+  return { x: (a.x+b.x)/2, y: (a.y+b.y)/2, z: (a.z+b.z)/2 };
+}
+function popisok(a, b, text, farba) {
+  const s = stred(a, b);
+  const k = { x: s.x, y: s.y, z: s.z + NASTAVENIA.POPISOK_ODSADENIE_MM };
+  const t = { start: pickMM(s), end: pickMM(k), text: text };
+  if (farba) t.color = farba;
+  return t;
+}
 
-async function nakresliMarkupy(A, B, dx, dy, dz) {
+async function nakresliMarkupy(A, B, dx, dy, dz, d3) {
   const N = NASTAVENIA;
   const P1 = { x: A.x + dx, y: A.y,      z: A.z };
   const P2 = { x: A.x + dx, y: A.y + dy, z: A.z };
+  const j = $("chkJednotkyM").checked ? " m" : " mm";
+  const ids = [];
 
-  const zoznam = [ meracik(A, B, N.FARBA_HLAVNA) ];
-  if ($("chkZlozky").checked) {
-    if (Math.abs(dx) > N.MIN_ZLOZKA_MM) zoznam.push(meracik(A,  P1, N.FARBA_X));
-    if (Math.abs(dy) > N.MIN_ZLOZKA_MM) zoznam.push(meracik(P1, P2, N.FARBA_Y));
-    if (Math.abs(dz) > N.MIN_ZLOZKA_MM) zoznam.push(meracik(P2, B,  N.FARBA_Z));
+  // kóty
+  const koty = [ meracik(A, B, N.FARBA_HLAVNA) ];
+  const kresliZlozky = $("chkZlozky").checked;
+  if (kresliZlozky) {
+    if (Math.abs(dx) > N.MIN_ZLOZKA_MM) koty.push(meracik(A,  P1, N.FARBA_X));
+    if (Math.abs(dy) > N.MIN_ZLOZKA_MM) koty.push(meracik(P1, P2, N.FARBA_Y));
+    if (Math.abs(dz) > N.MIN_ZLOZKA_MM) koty.push(meracik(P2, B,  N.FARBA_Z));
+  }
+  const vysK = await api.markup.addMeasurementMarkups(koty);
+  (vysK || []).forEach(m => { if (m.id !== undefined) ids.push(m.id); });
+
+  // trvalé textové popisky
+  if ($("chkPopisky").checked) {
+    const texty = [ popisok(A, B, "3D: " + fmt(d3) + j, N.FARBA_HLAVNA) ];
+    if (kresliZlozky) {
+      if (Math.abs(dx) > N.MIN_ZLOZKA_MM) texty.push(popisok(A,  P1, "X: " + fmt(Math.abs(dx)) + j, N.FARBA_X));
+      if (Math.abs(dy) > N.MIN_ZLOZKA_MM) texty.push(popisok(P1, P2, "Y: " + fmt(Math.abs(dy)) + j, N.FARBA_Y));
+      if (Math.abs(dz) > N.MIN_ZLOZKA_MM) texty.push(popisok(P2, B,  "Z: " + fmt(Math.abs(dz)) + j, N.FARBA_Z));
+    }
+    try {
+      const vysT = await api.markup.addTextMarkup(texty);
+      (vysT || []).forEach(m => { if (m.id !== undefined) ids.push(m.id); });
+    } catch (e) { dbg({ popiskyChyba: e.message }); }
   }
 
-  const vysledok = await api.markup.addMeasurementMarkups(zoznam);
-  return (vysledok || []).map(m => m.id).filter(id => id !== undefined);
+  return ids;
 }
 
 /* ============================================================
-   ČISTENIE BODOVÝCH ŠTÍTKOV PICKERA
-   Picker vytvára pri kliknutých bodoch point markupy so
-   súradnicami (ružové štítky, ktoré preblikávajú). Mažeme
-   len tie, ktoré vznikli po zapnutí merania.
+   ČISTENIE BODOVÝCH ŠTÍTKOV (poistka; s nástrojom "picking"
+   by už nemali vznikať)
    ============================================================ */
 async function zmazNoveBodoveStitky() {
   try {
