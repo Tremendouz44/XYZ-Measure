@@ -1,8 +1,8 @@
 {
-  "id": "meranie-xyz",
   "title": "Meranie XYZ",
   "description": "Meranie vzdialenosti medzi 2 bodmi s rozkladom na zložky X, Y, Z vo farbách osí",
-  "type": "3dviewer",
+  "extensionType": ["3dviewer"],
   "url": "https://tremendouz44.github.io/XYZ-Measure/",
-  "icon": "https://tremendouz44.github.io/XYZ-Measure/favicon.ico"
+  "icon": "https://tremendouz44.github.io/XYZ-Measure/favicon.ico",
+  "enabled": true
 }
