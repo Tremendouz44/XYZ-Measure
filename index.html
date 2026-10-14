@@ -1,81 +1,120 @@
 <!DOCTYPE html>
-<html lang="sk">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Meranie XYZ by BJM</title>
+<title>XYZ Measure by BJM</title>
 <style>
   /* ============================================================
-     NASTAVENIA VZHĽADU
+     APPEARANCE SETTINGS
      ============================================================ */
   :root {
-    --farba-x: #d32f2f;      /* červená - os X */
-    --farba-y: #2e7d32;      /* zelená  - os Y */
-    --farba-z: #1565c0;      /* modrá   - os Z */
-    --farba-pozadie: #fafafa;
-    --farba-panel: #ffffff;
-    --farba-akcent: #005f9e; /* Trimble modrá */
+    --color-x: #d32f2f;      /* red   - X axis */
+    --color-y: #2e7d32;      /* green - Y axis */
+    --color-z: #1565c0;      /* blue  - Z axis */
+    --color-bg: #fafafa;
+    --color-panel: #ffffff;
+    --color-accent: #005f9e; /* Trimble blue */
     --font: "Segoe UI", Roboto, Arial, sans-serif;
-    --pismo-tabulka: 12px;
+    --table-font: 12px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: var(--font); background: var(--farba-pozadie); color: #212121; font-size: 13px; padding: 10px; }
-  h1 { font-size: 15px; margin-bottom: 8px; color: var(--farba-akcent); }
-  .stav { padding: 8px 10px; border-radius: 4px; background: #e3f2fd; margin-bottom: 8px; font-size: 12px; min-height: 34px; }
-  .stav.aktivny { background: #fff8e1; border-left: 3px solid #f9a825; }
-  .stav.chyba { background: #ffebee; border-left: 3px solid var(--farba-x); }
+  body { font-family: var(--font); background: var(--color-bg); color: #212121; font-size: 13px; padding: 10px; }
+  h1 { font-size: 15px; margin-bottom: 8px; color: var(--color-accent); }
+  h2 { font-size: 11px; font-weight: 600; color: #757575; text-transform: uppercase; letter-spacing: .04em; margin: 12px 0 6px; }
+  .status { padding: 8px 10px; border-radius: 4px; background: #e3f2fd; margin-bottom: 8px; font-size: 12px; min-height: 34px; }
+  .status.active { background: #fff8e1; border-left: 3px solid #f9a825; }
+  .status.error { background: #ffebee; border-left: 3px solid var(--color-x); }
+
   button { font-family: var(--font); font-size: 12px; padding: 7px 10px; border: 1px solid #bdbdbd; border-radius: 4px; background: #fff; cursor: pointer; margin: 0 4px 6px 0; }
   button:hover { background: #f0f0f0; }
-  button.primarne { background: var(--farba-akcent); color: #fff; border-color: var(--farba-akcent); }
-  button.primarne:hover { background: #004a7c; }
-  button.primarne.zapnute { background: #f9a825; border-color: #f9a825; color: #212121; }
   button:disabled { opacity: .5; cursor: default; }
-  table { width: 100%; border-collapse: collapse; background: var(--farba-panel); font-size: var(--pismo-tabulka); margin-top: 6px; }
+
+  /* Toggle button look = the "Measure" button: blue when off, amber when on */
+  button.primary { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
+  button.primary:hover { background: #004a7c; }
+  button.primary.on { background: #f9a825; border-color: #f9a825; color: #212121; }
+  button.primary.on:hover { background: #f59e0b; }
+
+  button.tgl { display: block; width: 100%; text-align: left; margin: 0 0 6px 0; }
+  button.tgl::after { content: "OFF"; float: right; font-size: 10px; opacity: .75; padding-top: 1px; }
+  button.tgl.on::after { content: "ON"; font-weight: 700; opacity: 1; }
+
+  .lock-row { display: flex; gap: 6px; }
+  .lock-row button.tgl { margin: 0; text-align: center; flex: 1; }
+  .lock-row button.tgl::after { content: ""; }
+
+  .snap-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .snap-row button { margin: 0; width: 38px; height: 34px; padding: 4px; display: flex; align-items: center; justify-content: center; flex: none; }
+  .snap-row svg { width: 24px; height: 24px; display: block; }
+  .snap-row span { font-size: 12px; cursor: pointer; user-select: none; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--color-panel); font-size: var(--table-font); margin-top: 6px; }
   th, td { border: 1px solid #e0e0e0; padding: 4px 6px; text-align: right; white-space: nowrap; }
   th { background: #eeeeee; position: sticky; top: 0; }
   td:first-child, th:first-child { text-align: center; }
-  .cx { color: var(--farba-x); font-weight: 600; }
-  .cy { color: var(--farba-y); font-weight: 600; }
-  .cz { color: var(--farba-z); font-weight: 600; }
+  .cx { color: var(--color-x); font-weight: 600; }
+  .cy { color: var(--color-y); font-weight: 600; }
+  .cz { color: var(--color-z); font-weight: 600; }
   .c3 { font-weight: 700; }
-  .mala { font-size: 11px; color: #757575; margin-top: 6px; }
-  .riadok-akcie button { padding: 2px 6px; margin: 0 2px; font-size: 11px; }
-  #tabulkaObal { max-height: 40vh; overflow-y: auto; }
-  details { margin-top: 10px; font-size: 11px; color: #757575; }
-  pre { white-space: pre-wrap; word-break: break-all; background: #f5f5f5; padding: 6px; border-radius: 4px; max-height: 150px; overflow: auto; }
-  .prepinace { margin: 6px 0; font-size: 12px; }
-  .prepinace label { margin-right: 10px; cursor: pointer; display: inline-block; margin-bottom: 4px; }
-  fieldset.snap { border: 1px solid #e0e0e0; border-radius: 4px; padding: 6px 8px; margin: 6px 0; font-size: 12px; }
-  fieldset.snap legend { font-size: 11px; color: #757575; padding: 0 4px; }
-  fieldset.snap label { margin-right: 10px; cursor: pointer; }
+  .row-action button { padding: 2px 6px; margin: 0 2px; font-size: 11px; }
+  #tableWrap { max-height: 40vh; overflow-y: auto; margin-top: 10px; }
 </style>
 </head>
 <body>
-  <h1>📐 Meranie XYZ</h1>
-  <div id="stav" class="stav">Pripájam sa na 3D Viewer…</div>
+  <h1>📐 XYZ Measure</h1>
+  <div id="status" class="status">Connecting to 3D Viewer…</div>
 
   <div>
-    <button id="btnMerat" class="primarne" disabled>▶ Merať</button>
-    <button id="btnZmazVsetko" disabled>🗑 Zmazať všetky</button>
-    <button id="btnKopiruj" disabled>📋 Kopírovať tabuľku</button>
+    <button id="btnMeasure" class="primary" disabled>▶ Measure</button>
+    <button id="btnClear" disabled>🗑 Delete all</button>
+    <button id="btnCopy" disabled>📋 Copy table</button>
   </div>
 
-  <fieldset class="snap">
-    <legend>Snap (na čo sa kurzor chytá)</legend>
-    <label><input type="checkbox" id="snapBody" checked> body/rohy</label>
-    <label><input type="checkbox" id="snapHrany" checked> hrany</label>
-    <label><input type="checkbox" id="snapPlochy" checked> plochy</label>
-  </fieldset>
-
-  <div class="prepinace">
-    <label><input type="checkbox" id="chkKontinualne" checked> kontinuálne meranie</label>
-    <label><input type="checkbox" id="chkZlozky" checked> kresliť X/Y/Z zložky</label>
-    <label><input type="checkbox" id="chkPopisky" checked> trvalé popisky hodnôt</label>
-    <label><input type="checkbox" id="chkJednotkyM"> jednotky v m (inak mm)</label>
+  <h2>Snap to</h2>
+  <div class="snap-row">
+    <button id="snapPoints" class="primary tgl-ico" aria-pressed="false" title="Points">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linejoin="round">
+        <path d="M12 2 21 7v10l-9 5-9-5V7z M12 12 3 7 M12 12l9-5 M12 12v10" stroke-width="1.3" opacity=".6"/>
+        <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>
+      </svg>
+    </button>
+    <span data-for="snapPoints">Points</span>
+  </div>
+  <div class="snap-row">
+    <button id="snapLines" class="primary tgl-ico" aria-pressed="false" title="Lines">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M12 2 21 7v10l-9 5-9-5V7z M12 12 3 7 M12 12l9-5" stroke-width="1.3" opacity=".6"/>
+        <path d="M12 12v10" stroke-width="3.2"/>
+      </svg>
+    </button>
+    <span data-for="snapLines">Lines</span>
+  </div>
+  <div class="snap-row">
+    <button id="snapFaces" class="primary tgl-ico" aria-pressed="false" title="Faces">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linejoin="round">
+        <path d="M12 2 21 7v10l-9 5-9-5V7z M12 12 3 7 M12 12l9-5 M12 12v10" stroke-width="1.3" opacity=".6"/>
+        <path d="M3 7l9 5v10l-9-5z" fill="currentColor" stroke="none"/>
+      </svg>
+    </button>
+    <span data-for="snapFaces">Faces</span>
   </div>
 
-  <div id="tabulkaObal">
-    <table id="tabulka">
+  <h2>Options</h2>
+  <button id="tglContinuous" class="primary tgl on" aria-pressed="true">Continuous measuring</button>
+  <button id="tglComponents" class="primary tgl on" aria-pressed="true">Draw X Y Z components</button>
+  <button id="tglLabels" class="primary tgl" aria-pressed="false">Permanent value labels</button>
+  <button id="tglMeters" class="primary tgl" aria-pressed="false">Units in meters (default mm)</button>
+
+  <h2>Coordinate lock</h2>
+  <div class="lock-row">
+    <button id="lockX" class="primary tgl" aria-pressed="false" title="Second point keeps the X of the first point">Lock X</button>
+    <button id="lockY" class="primary tgl" aria-pressed="false" title="Second point keeps the Y of the first point">Lock Y</button>
+    <button id="lockZ" class="primary tgl" aria-pressed="false" title="Second point keeps the Z of the first point">Lock Z</button>
+  </div>
+
+  <div id="tableWrap">
+    <table id="table">
       <thead>
         <tr>
           <th>#</th>
@@ -87,174 +126,181 @@
           <th></th>
         </tr>
       </thead>
-      <tbody id="telo"></tbody>
+      <tbody id="tbody"></tbody>
     </table>
   </div>
-
-  <p class="mala">
-    Klikni <b>Merať</b> a vyber 2 body – meranie sa vytvorí okamžite po druhom
-    kliku: klasická kóta + zložky <span class="cx">X</span>/<span class="cy">Y</span>/<span class="cz">Z</span>
-    vo farbách osí. <b>Trvalé popisky</b> = textové štítky s hodnotami, ktoré
-    nemiznú pri otáčaní kamery (kóty si viewer pri niektorých uhloch skrýva sám).
-    Pri vypnutom <b>kontinuálnom meraní</b> sa po jednom meraní funkcia sama ukončí.
-  </p>
-
-  <details>
-    <summary>Diagnostika (pre ladenie)</summary>
-    <pre id="debug">–</pre>
-  </details>
 
 <script type="module">
 import * as TCW from "https://esm.run/trimble-connect-workspace-api";
 
 /* ============================================================
-   NASTAVENIA
+   SETTINGS
    ============================================================
-   JEDNOTKY: pick event vracia METRE, markup API MILIMETRE.
-   Overené hodnoty z knižnice v0.3.34:
-     TOOLS obsahuje "picking" (výber bodov)
+   UNITS: the pick event returns METRES, the markup API uses MILLIMETRES.
+   Values verified against library v0.3.34:
+     TOOLS contains "picking" (point picking)
      TOOL_SNAP_TYPES = ["edge","point","surface"]
      ToolOptions = { snapTypes: string[], instruction: {title,text} }
    ============================================================ */
-const NASTAVENIA = {
-  FARBA_X:      { r: 211, g: 47,  b: 47,  a: 255 },  // červená
-  FARBA_Y:      { r: 46,  g: 125, b: 50,  a: 255 },  // zelená
-  FARBA_Z:      { r: 21,  g: 101, b: 192, a: 255 },  // modrá
-  FARBA_HLAVNA: null,           // null = predvolená farba Viewera
-  PREVOD_PICK_NA_MM: 1000,      // pick event (m) -> mm
-  MIN_ZLOZKA_MM: 0.5,           // kratšie zložky sa nekreslia
-  DESATINNE_MM: 0,
-  DESATINNE_M: 3,
-  NAZOV_NASTROJA: "picking",
-  POPISOK_ODSADENIE_MM: 150     // odsadenie textového popisku od stredu čiary
+const SETTINGS = {
+  COLOR_X:      { r: 211, g: 47,  b: 47,  a: 255 },  // red
+  COLOR_Y:      { r: 46,  g: 125, b: 50,  a: 255 },  // green
+  COLOR_Z:      { r: 21,  g: 101, b: 192, a: 255 },  // blue
+  COLOR_MAIN:   null,            // null = Viewer default colour
+  PICK_TO_MM:   1000,            // pick event (m) -> mm
+  MIN_COMPONENT_MM: 0.5,         // shorter components are not drawn
+  DECIMALS_MM:  0,
+  DECIMALS_M:   3,
+  TOOL_NAME:    "picking",
+  LABEL_OFFSET_MM: 150           // offset of the text label from the line centre
 };
 
 /* ============================================================
-   STAV
+   STATE
    ============================================================ */
 let api = null;
-let meranieAktivne = false;
-let prvyBod = null;             // {x,y,z} v mm
-let merania = [];               // {cislo, dx, dy, dz, d3, d2, markupIds:[]}
-let cisloMerania = 0;
-let znameBodoveIds = new Set();
+let measuring = false;
+let firstPoint = null;           // {x,y,z} in mm
+let measurements = [];           // {num, dx, dy, dz, d3, d2, markupIds:[]}
+let measurementCounter = 0;
+let knownPointIds = new Set();
 
 const $ = id => document.getElementById(id);
-const stavEl = $("stav"), debugEl = $("debug");
+const statusEl = $("status");
+const isOn = id => $(id).classList.contains("on");
 
-function nastavStav(text, trieda) {
-  stavEl.textContent = text;
-  stavEl.className = "stav" + (trieda ? " " + trieda : "");
-}
-function dbg(obj) {
-  try { debugEl.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 1); } catch(e){}
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className = "status" + (cls ? " " + cls : "");
 }
 
 /* ============================================================
-   PRIPOJENIE
+   TOGGLE BUTTONS
    ============================================================ */
-async function pripoj() {
-  try {
-    api = await TCW.connect(window.parent, (event, args) => {
-      if (event === "viewer.onPicked") spracujPick(args);
-    }, 30000);
-
-    await zapamatajBodoveMarkupy();
-
-    nastavStav("Pripojené. Klikni Merať a vyber 2 body v modeli.");
-    $("btnMerat").disabled = false;
-    $("btnZmazVsetko").disabled = false;
-    $("btnKopiruj").disabled = false;
-    dbg({ TOOLS: TCW.TOOLS, TOOL_SNAP_TYPES: TCW.TOOL_SNAP_TYPES });
-  } catch (e) {
-    nastavStav("Nepodarilo sa pripojiť na 3D Viewer: " + e.message, "chyba");
-  }
+function setToggle(id, on) {
+  $(id).classList.toggle("on", on);
+  $(id).setAttribute("aria-pressed", on ? "true" : "false");
 }
-
-async function zapamatajBodoveMarkupy() {
-  try {
-    const body = await api.markup.getSinglePointMarkups();
-    (body || []).forEach(b => { if (b.id !== undefined) znameBodoveIds.add(b.id); });
-  } catch(e){}
+function bindToggle(id, onChange) {
+  $(id).addEventListener("click", () => {
+    setToggle(id, !isOn(id));
+    if (onChange) onChange();
+  });
 }
-
-/* ============================================================
-   SNAP – mapovanie checkboxov na skutočné hodnoty API
-   ("point", "edge", "surface"; "stred" v API neexistuje)
-   ============================================================ */
-function vyberSnapy() {
-  const chcem = [];
-  if ($("snapBody").checked)   chcem.push("point");
-  if ($("snapHrany").checked)  chcem.push("edge");
-  if ($("snapPlochy").checked) chcem.push("surface");
-  return chcem;
-}
-
-["snapBody","snapHrany","snapPlochy"].forEach(id => {
-  $(id).onchange = async () => {
-    if (!meranieAktivne) return;
-    prvyBod = null;                      // reaktivácia zruší rozpracovaný výber
-    await aktivujNastroj();
-    nastavStav("Snap zmenený – vyber PRVÝ bod.", "aktivny");
-  };
+// clicking the text next to a snap icon toggles it as well
+document.querySelectorAll(".snap-row span[data-for]").forEach(s => {
+  s.addEventListener("click", () => $(s.dataset.for).click());
 });
 
 /* ============================================================
-   AKTIVÁCIA / DEAKTIVÁCIA VÝBERU BODOV
+   CONNECTION
    ============================================================ */
-async function aktivujNastroj() {
-  const snapy = vyberSnapy();
-  if (!snapy.length) {
-    nastavStav("Zapni aspoň jeden snap typ.", "chyba");
-    return false;
+async function connect() {
+  try {
+    api = await TCW.connect(window.parent, (event, args) => {
+      if (event === "viewer.onPicked") handlePick(args);
+    }, 30000);
+
+    await rememberPointMarkups();
+
+    setStatus("Connected. Click Measure and pick 2 points in the model.");
+    $("btnMeasure").disabled = false;
+    $("btnClear").disabled = false;
+    $("btnCopy").disabled = false;
+  } catch (e) {
+    setStatus("Could not connect to the 3D Viewer: " + e.message, "error");
   }
+}
+
+async function rememberPointMarkups() {
+  try {
+    const pts = await api.markup.getSinglePointMarkups();
+    (pts || []).forEach(p => { if (p.id !== undefined) knownPointIds.add(p.id); });
+  } catch (e) {}
+}
+
+/* ============================================================
+   SNAP – toggle buttons mapped to the real API values
+   ("point", "edge", "surface"; there is no "centre" snap)
+   ============================================================ */
+function selectedSnaps() {
+  const s = [];
+  if (isOn("snapPoints")) s.push("point");
+  if (isOn("snapLines"))  s.push("edge");
+  if (isOn("snapFaces"))  s.push("surface");
+  return s;
+}
+
+async function onSnapChanged() {
+  if (!measuring) return;
+  firstPoint = null;                    // re-activation discards an unfinished pick
+  await activateTool();
+  setStatus("Snap changed – pick the FIRST point.", "active");
+}
+bindToggle("snapPoints", onSnapChanged);
+bindToggle("snapLines",  onSnapChanged);
+bindToggle("snapFaces",  onSnapChanged);
+
+bindToggle("tglContinuous");
+bindToggle("tglComponents");
+bindToggle("tglLabels");
+bindToggle("tglMeters", () => renderTable());
+bindToggle("lockX");
+bindToggle("lockY");
+bindToggle("lockZ");
+
+/* ============================================================
+   POINT PICKING ON / OFF
+   ============================================================ */
+async function activateTool() {
   const options = {
-    snapTypes: snapy,
-    instruction: { title: "Meranie XYZ", text: "Vyber 2 body merania" }
+    snapTypes: selectedSnaps(),
+    instruction: { title: "XYZ Measure", text: "Pick 2 points to measure" }
   };
   try {
-    await api.viewer.activateTool(NASTAVENIA.NAZOV_NASTROJA, options);
+    await api.viewer.activateTool(SETTINGS.TOOL_NAME, options);
     return true;
   } catch (e) {
-    try { await api.viewer.activateTool(NASTAVENIA.NAZOV_NASTROJA); return true; }
+    try { await api.viewer.activateTool(SETTINGS.TOOL_NAME); return true; }
     catch (e2) {
-      nastavStav("Nepodarilo sa aktivovať nástroj 'picking': " + e2.message, "chyba");
-      dbg({ chyba: e2.message, dostupneTOOLS: TCW.TOOLS });
+      setStatus("Could not activate the 'picking' tool: " + e2.message, "error");
       return false;
     }
   }
 }
 
-async function zapniMeranie() {
-  await zapamatajBodoveMarkupy();
-  if (!await aktivujNastroj()) return;
-  meranieAktivne = true;
-  prvyBod = null;
-  $("btnMerat").classList.add("zapnute");
-  $("btnMerat").textContent = "⏹ Ukončiť meranie";
-  nastavStav("Meranie aktívne – vyber PRVÝ bod v modeli.", "aktivny");
+async function startMeasuring() {
+  await rememberPointMarkups();
+  if (!await activateTool()) return;
+  measuring = true;
+  firstPoint = null;
+  setToggle("btnMeasure", true);
+  $("btnMeasure").textContent = "⏹ Stop measuring";
+  setStatus("Measuring – pick the FIRST point in the model.", "active");
 }
 
-async function vypniMeranie(text) {
-  try { await api.viewer.activateTool("reset"); } catch(e){}
-  meranieAktivne = false;
-  prvyBod = null;
-  await zmazNoveBodoveStitky();
-  $("btnMerat").classList.remove("zapnute");
-  $("btnMerat").textContent = "▶ Merať";
-  nastavStav(text || "Meranie ukončené.");
+async function stopMeasuring(text) {
+  // flip our own state first so any late pick event is ignored
+  measuring = false;
+  firstPoint = null;
+  setToggle("btnMeasure", false);
+  $("btnMeasure").textContent = "▶ Measure";
+  try { await api.viewer.activateTool("reset"); }
+  catch (e) { try { await api.viewer.activateTool("selection"); } catch (e2) {} }
+  await removeNewPointLabels();
+  setStatus(text || "Measuring stopped.");
 }
 
-$("btnMerat").onclick = () => meranieAktivne ? vypniMeranie() : zapniMeranie();
+$("btnMeasure").onclick = () => measuring ? stopMeasuring() : startMeasuring();
 
 /* ============================================================
-   SPRACOVANIE VYBRANÉHO BODU (meria sa HNEĎ na 2. klik)
+   HANDLING A PICKED POINT (measurement is created on the 2nd click)
    ============================================================ */
-function extrahujBod(args) {
+function extractPoint(args) {
   let d = args && (args.data ?? args);
   if (Array.isArray(d)) d = d[d.length - 1];
   if (!d) return null;
-  const K = NASTAVENIA.PREVOD_PICK_NA_MM;
+  const K = SETTINGS.PICK_TO_MM;
   if (typeof d.positionX === "number")
     return { x: d.positionX * K, y: d.positionY * K, z: d.positionZ * K };
   if (d.position && typeof d.position.x === "number")
@@ -264,181 +310,191 @@ function extrahujBod(args) {
   return null;
 }
 
-function fmtBod(p) {
+function fmtPoint(p) {
   return "[" + fmt(p.x) + "; " + fmt(p.y) + "; " + fmt(p.z) + "]";
 }
 
-async function spracujPick(args) {
-  if (!meranieAktivne) return;
-  const b = extrahujBod(args);
-  if (!b) { dbg({ neznamyPayload: args }); return; }
+async function handlePick(args) {
+  if (!measuring) return;
+  const picked = extractPoint(args);
+  if (!picked) return;
 
-  if (!prvyBod) {
-    prvyBod = b;
-    nastavStav("Bod 1: " + fmtBod(b) + " – vyber DRUHÝ bod.", "aktivny");
+  if (!firstPoint) {
+    firstPoint = picked;
+    const locks = ["X", "Y", "Z"].filter(a => isOn("lock" + a));
+    setStatus("Point 1: " + fmtPoint(picked) + " – pick the SECOND point." +
+              (locks.length ? " Locked: " + locks.join(", ") + "." : ""), "active");
     return;
   }
 
-  const A = prvyBod, B = b;
-  prvyBod = null;
+  const A = firstPoint;
+  const B = { x: picked.x, y: picked.y, z: picked.z };
+
+  // coordinate lock: the second point keeps the locked coordinate of the first one
+  if (isOn("lockX")) B.x = A.x;
+  if (isOn("lockY")) B.y = A.y;
+  if (isOn("lockZ")) B.z = A.z;
 
   const dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z;
   const d3 = Math.sqrt(dx*dx + dy*dy + dz*dz);
   const d2 = Math.sqrt(dx*dx + dy*dy);
 
-  cisloMerania++;
-  const zaznam = { cislo: cisloMerania, dx, dy, dz, d3, d2, markupIds: [] };
+  if (d3 < 0.01) {
+    setStatus("Nothing to measure – the points are identical (all three axes locked?). Pick the second point again.", "error");
+    return;                              // the first point stays selected
+  }
 
-  try { zaznam.markupIds = await nakresliMarkupy(A, B, dx, dy, dz, d3); }
-  catch (e) { dbg({ markupChyba: e.message }); }
+  firstPoint = null;
+  measurementCounter++;
+  const record = { num: measurementCounter, dx, dy, dz, d3, d2, markupIds: [] };
 
-  await zmazNoveBodoveStitky();
+  try { record.markupIds = await drawMarkups(A, B, dx, dy, dz, d3); }
+  catch (e) { console.log("Markup error:", e.message); }
 
-  merania.push(zaznam);
-  vykresliTabulku();
+  await removeNewPointLabels();
 
-  if ($("chkKontinualne").checked) {
-    nastavStav("Meranie #" + cisloMerania + " hotové. Vyber PRVÝ bod ďalšieho merania.", "aktivny");
+  measurements.push(record);
+  renderTable();
+
+  if (isOn("tglContinuous")) {
+    setStatus("Measurement #" + measurementCounter + " done. Pick the FIRST point of the next one.", "active");
   } else {
-    await vypniMeranie("Meranie #" + cisloMerania + " hotové. Funkcia ukončená.");
+    await stopMeasuring("Measurement #" + measurementCounter + " done.");
   }
 }
 
 /* ============================================================
-   KRESLENIE DO MODELU (mm)
-   Hlavná kóta A→B + "schodík" zložiek + trvalé textové popisky.
-   Textové popisky (addTextMarkup) viewer neskrýva pri otáčaní
-   kamery, na rozdiel od kót, ktoré si robí declutter.
+   DRAWING INTO THE MODEL (mm)
+   Main dimension A→B + "staircase" of components + permanent text labels.
+   Text markups (addTextMarkup) are not hidden by the Viewer when the
+   camera rotates, unlike dimensions (the Viewer declutters those).
    ============================================================ */
 function pickMM(p) {
   return { positionX: p.x, positionY: p.y, positionZ: p.z, type: "point" };
 }
-function meracik(a, b, farba) {
+function dimension(a, b, color) {
   const m = { start: pickMM(a), end: pickMM(b), mainLineStart: pickMM(a), mainLineEnd: pickMM(b) };
-  if (farba) m.color = farba;
+  if (color) m.color = color;
   return m;
 }
-function stred(a, b) {
+function midpoint(a, b) {
   return { x: (a.x+b.x)/2, y: (a.y+b.y)/2, z: (a.z+b.z)/2 };
 }
-function popisok(a, b, text, farba) {
-  const s = stred(a, b);
-  const k = { x: s.x, y: s.y, z: s.z + NASTAVENIA.POPISOK_ODSADENIE_MM };
+function labelAt(a, b, text, color) {
+  const s = midpoint(a, b);
+  const k = { x: s.x, y: s.y, z: s.z + SETTINGS.LABEL_OFFSET_MM };
   const t = { start: pickMM(s), end: pickMM(k), text: text };
-  if (farba) t.color = farba;
+  if (color) t.color = color;
   return t;
 }
 
-async function nakresliMarkupy(A, B, dx, dy, dz, d3) {
-  const N = NASTAVENIA;
+async function drawMarkups(A, B, dx, dy, dz, d3) {
+  const S = SETTINGS;
   const P1 = { x: A.x + dx, y: A.y,      z: A.z };
   const P2 = { x: A.x + dx, y: A.y + dy, z: A.z };
-  const j = $("chkJednotkyM").checked ? " m" : " mm";
+  const unit = isOn("tglMeters") ? " m" : " mm";
   const ids = [];
 
-  // kóty
-  const koty = [ meracik(A, B, N.FARBA_HLAVNA) ];
-  const kresliZlozky = $("chkZlozky").checked;
-  if (kresliZlozky) {
-    if (Math.abs(dx) > N.MIN_ZLOZKA_MM) koty.push(meracik(A,  P1, N.FARBA_X));
-    if (Math.abs(dy) > N.MIN_ZLOZKA_MM) koty.push(meracik(P1, P2, N.FARBA_Y));
-    if (Math.abs(dz) > N.MIN_ZLOZKA_MM) koty.push(meracik(P2, B,  N.FARBA_Z));
+  const dims = [ dimension(A, B, S.COLOR_MAIN) ];
+  const drawComponents = isOn("tglComponents");
+  if (drawComponents) {
+    if (Math.abs(dx) > S.MIN_COMPONENT_MM) dims.push(dimension(A,  P1, S.COLOR_X));
+    if (Math.abs(dy) > S.MIN_COMPONENT_MM) dims.push(dimension(P1, P2, S.COLOR_Y));
+    if (Math.abs(dz) > S.MIN_COMPONENT_MM) dims.push(dimension(P2, B,  S.COLOR_Z));
   }
-  const vysK = await api.markup.addMeasurementMarkups(koty);
-  (vysK || []).forEach(m => { if (m.id !== undefined) ids.push(m.id); });
+  const resDims = await api.markup.addMeasurementMarkups(dims);
+  (resDims || []).forEach(m => { if (m.id !== undefined) ids.push(m.id); });
 
-  // trvalé textové popisky
-  if ($("chkPopisky").checked) {
-    const texty = [ popisok(A, B, "3D: " + fmt(d3) + j, N.FARBA_HLAVNA) ];
-    if (kresliZlozky) {
-      if (Math.abs(dx) > N.MIN_ZLOZKA_MM) texty.push(popisok(A,  P1, "X: " + fmt(Math.abs(dx)) + j, N.FARBA_X));
-      if (Math.abs(dy) > N.MIN_ZLOZKA_MM) texty.push(popisok(P1, P2, "Y: " + fmt(Math.abs(dy)) + j, N.FARBA_Y));
-      if (Math.abs(dz) > N.MIN_ZLOZKA_MM) texty.push(popisok(P2, B,  "Z: " + fmt(Math.abs(dz)) + j, N.FARBA_Z));
+  if (isOn("tglLabels")) {
+    const texts = [ labelAt(A, B, "3D: " + fmt(d3) + unit, S.COLOR_MAIN) ];
+    if (drawComponents) {
+      if (Math.abs(dx) > S.MIN_COMPONENT_MM) texts.push(labelAt(A,  P1, "X: " + fmt(Math.abs(dx)) + unit, S.COLOR_X));
+      if (Math.abs(dy) > S.MIN_COMPONENT_MM) texts.push(labelAt(P1, P2, "Y: " + fmt(Math.abs(dy)) + unit, S.COLOR_Y));
+      if (Math.abs(dz) > S.MIN_COMPONENT_MM) texts.push(labelAt(P2, B,  "Z: " + fmt(Math.abs(dz)) + unit, S.COLOR_Z));
     }
     try {
-      const vysT = await api.markup.addTextMarkup(texty);
-      (vysT || []).forEach(m => { if (m.id !== undefined) ids.push(m.id); });
-    } catch (e) { dbg({ popiskyChyba: e.message }); }
+      const resTxt = await api.markup.addTextMarkup(texts);
+      (resTxt || []).forEach(m => { if (m.id !== undefined) ids.push(m.id); });
+    } catch (e) { console.log("Label error:", e.message); }
   }
 
   return ids;
 }
 
 /* ============================================================
-   ČISTENIE BODOVÝCH ŠTÍTKOV (poistka; s nástrojom "picking"
-   by už nemali vznikať)
+   CLEANING UP POINT LABELS (safety net; with the "picking" tool
+   they should not appear at all)
    ============================================================ */
-async function zmazNoveBodoveStitky() {
+async function removeNewPointLabels() {
   try {
-    const body = await api.markup.getSinglePointMarkups();
-    const nove = (body || [])
-      .map(b => b.id)
-      .filter(id => id !== undefined && !znameBodoveIds.has(id));
-    if (nove.length) await api.markup.removeMarkups(nove);
-  } catch(e){}
+    const pts = await api.markup.getSinglePointMarkups();
+    const fresh = (pts || [])
+      .map(p => p.id)
+      .filter(id => id !== undefined && !knownPointIds.has(id));
+    if (fresh.length) await api.markup.removeMarkups(fresh);
+  } catch (e) {}
 }
 
 /* ============================================================
-   TABUĽKA + AKCIE (interné hodnoty v MILIMETROCH)
+   TABLE + ACTIONS (internal values in MILLIMETRES)
    ============================================================ */
-function fmt(hodnotaMM) {
-  if ($("chkJednotkyM").checked)
-    return (hodnotaMM / 1000).toFixed(NASTAVENIA.DESATINNE_M);
-  return hodnotaMM.toFixed(NASTAVENIA.DESATINNE_MM);
+function fmt(valueMM) {
+  if (isOn("tglMeters"))
+    return (valueMM / 1000).toFixed(SETTINGS.DECIMALS_M);
+  return valueMM.toFixed(SETTINGS.DECIMALS_MM);
 }
 
-function vykresliTabulku() {
-  const telo = $("telo");
-  telo.innerHTML = "";
-  for (const m of merania) {
+function renderTable() {
+  const tbody = $("tbody");
+  tbody.innerHTML = "";
+  for (const m of measurements) {
     const tr = document.createElement("tr");
     tr.innerHTML =
-      "<td>" + m.cislo + "</td>" +
+      "<td>" + m.num + "</td>" +
       "<td class='cx'>" + fmt(Math.abs(m.dx)) + "</td>" +
       "<td class='cy'>" + fmt(Math.abs(m.dy)) + "</td>" +
       "<td class='cz'>" + fmt(Math.abs(m.dz)) + "</td>" +
       "<td class='c3'>" + fmt(m.d3) + "</td>" +
       "<td>" + fmt(m.d2) + "</td>" +
-      "<td class='riadok-akcie'><button title='Zmazať meranie'>✕</button></td>";
-    tr.querySelector("button").onclick = () => zmazMeranie(m);
-    telo.appendChild(tr);
+      "<td class='row-action'><button title='Delete measurement'>✕</button></td>";
+    tr.querySelector("button").onclick = () => deleteMeasurement(m);
+    tbody.appendChild(tr);
   }
 }
-$("chkJednotkyM").onchange = vykresliTabulku;
 
-async function zmazMeranie(m) {
+async function deleteMeasurement(m) {
   if (m.markupIds.length) {
-    try { await api.markup.removeMarkups(m.markupIds); } catch(e){}
+    try { await api.markup.removeMarkups(m.markupIds); } catch (e) {}
   }
-  merania = merania.filter(x => x !== m);
-  vykresliTabulku();
+  measurements = measurements.filter(x => x !== m);
+  renderTable();
 }
 
-$("btnZmazVsetko").onclick = async () => {
-  const ids = merania.flatMap(m => m.markupIds);
-  if (ids.length) { try { await api.markup.removeMarkups(ids); } catch(e){} }
-  await zmazNoveBodoveStitky();
-  merania = [];
-  vykresliTabulku();
-  nastavStav("Všetky merania zmazané.");
+$("btnClear").onclick = async () => {
+  const ids = measurements.flatMap(m => m.markupIds);
+  if (ids.length) { try { await api.markup.removeMarkups(ids); } catch (e) {} }
+  await removeNewPointLabels();
+  measurements = [];
+  renderTable();
+  setStatus("All measurements deleted.");
 };
 
-$("btnKopiruj").onclick = () => {
-  const j = $("chkJednotkyM").checked ? "m" : "mm";
-  let text = "#\t|dX| [" + j + "]\t|dY| [" + j + "]\t|dZ| [" + j + "]\t3D [" + j + "]\t2D-XY [" + j + "]\n";
-  for (const m of merania) {
-    text += [m.cislo, fmt(Math.abs(m.dx)), fmt(Math.abs(m.dy)),
+$("btnCopy").onclick = () => {
+  const u = isOn("tglMeters") ? "m" : "mm";
+  let text = "#\t|dX| [" + u + "]\t|dY| [" + u + "]\t|dZ| [" + u + "]\t3D [" + u + "]\t2D-XY [" + u + "]\n";
+  for (const m of measurements) {
+    text += [m.num, fmt(Math.abs(m.dx)), fmt(Math.abs(m.dy)),
              fmt(Math.abs(m.dz)), fmt(m.d3), fmt(m.d2)].join("\t") + "\n";
   }
   navigator.clipboard.writeText(text)
-    .then(() => nastavStav("Tabuľka skopírovaná (TAB-oddelené, rovno do Excelu)."))
-    .catch(() => nastavStav("Kopírovanie zlyhalo – skopíruj tabuľku ručne.", "chyba"));
+    .then(() => setStatus("Table copied (tab-separated, paste straight into Excel)."))
+    .catch(() => setStatus("Copy failed – copy the table manually.", "error"));
 };
 
 /* ============================================================
-   ŠTART
+   START
    ============================================================ */
-pripoj();
+connect();
 </script>
 </body>
 </html>
