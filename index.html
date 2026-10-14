@@ -348,18 +348,27 @@ async function handlePick(args) {
   measurementCounter++;
   const record = { num: measurementCounter, dx, dy, dz, d3, d2, markupIds: [] };
 
-  try { record.markupIds = await drawMarkups(A, B, dx, dy, dz, d3); }
-  catch (e) { console.log("Markup error:", e.message); }
+  // drawing problems are shown in the status box instead of failing silently
+  let drawNote = "";
+  try {
+    record.markupIds = await drawMarkups(A, B, dx, dy, dz, d3);
+    if (!record.markupIds.length) drawNote = " WARNING: the Viewer returned no markups (nothing drawn).";
+  } catch (e) {
+    drawNote = " DRAWING FAILED: " + (e && e.message ? e.message : String(e));
+    console.log("Markup error:", e);
+  }
 
   await removeNewPointLabels();
 
   measurements.push(record);
   renderTable();
 
+  const cls = drawNote ? "error" : "active";
   if (isOn("tglContinuous")) {
-    setStatus("Measurement #" + measurementCounter + " done. Pick the FIRST point of the next one.", "active");
+    setStatus("Measurement #" + measurementCounter + " done." + drawNote + " Pick the FIRST point of the next one.", cls);
   } else {
-    await stopMeasuring("Measurement #" + measurementCounter + " done.");
+    await stopMeasuring("Measurement #" + measurementCounter + " done." + drawNote);
+    if (drawNote) statusEl.className = "status error";
   }
 }
 
