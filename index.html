@@ -79,7 +79,7 @@
 </style>
 </head>
 <body>
-  <h1>📐 XYZ Measure <span class="muted" id="appVersion" title="If this does not match the latest version, press Ctrl+F5">v2026-10-20.4</span></h1>
+  <h1>📐 XYZ Measure <span class="muted" id="appVersion" title="If this does not match the latest version, press Ctrl+F5">v2026-10-22.1</span></h1>
   <div id="status" class="status">Connecting to 3D Viewer…</div>
 
   <div>
@@ -121,7 +121,6 @@
   <h2>Options</h2>
   <button id="tglContinuous" class="primary tgl on" aria-pressed="true">Continuous measuring</button>
   <button id="tglComponents" class="primary tgl on" aria-pressed="true">Draw X Y Z components</button>
-  <button id="tglIds" class="primary tgl on" aria-pressed="true" style="display:none" title="Label each measurement in the model with its number from the table (#1, ∠1 …)">Show IDs in model</button>
   <button id="tglLabels" class="primary tgl" aria-pressed="false" style="display:none">Permanent value labels</button>
   <button id="tglMeters" class="primary tgl" aria-pressed="false" style="display:none">Units in meters (default mm)</button>
 
@@ -197,13 +196,13 @@ const SETTINGS = {
   COLOR_AXIS_X: { r: 214, g: 58,  b: 84,  a: 255 },  // UCS X' axis (gizmo red, darker)
   COLOR_AXIS_Y: { r: 104, g: 168, b: 28,  a: 255 },  // UCS Y' axis (gizmo green, darker)
   COLOR_AXIS_Z: { r: 22,  g: 104, b: 212, a: 255 },  // UCS Z' axis (gizmo blue, darker)
-  AXIS_Z_RATIO: 0.5,             // drawn Z' axis length relative to X'/Y' (3D mode)
+  AXIS_DRAW_SCALE: 0.5,          // drawn axes (the cross) relative to the stored axis length
+  AXIS_Z_RATIO: 0.5,             // drawn Z' axis length relative to X'/Y' (2D and 3D UCS)
   PICK_TO_MM:   1000,            // pick event (m) -> mm
   MIN_COMPONENT_MM: 0.5,         // shorter components are not drawn
   MIN_AXIS_PICK_MM: 10,          // axis points must be at least this far apart (2D: in plan; 3D: also off the X' line)
   MIN_AXIS_DRAW_MM: 5000,        // drawn axes are at least this long
   COLOR_FRAME:  { r: 255, g: 214, b: 0,   a: 255 },  // yellow - local-axes frame
-  COLOR_ID:     { r: 33,  g: 33,  b: 33,  a: 255 },  // dark grey - measurement ID labels (#1 …)
   COLOR_ANGLE:  { r: 230, g: 0,   b: 178, a: 255 },  // magenta (as the Viewer's own measurements) - angle
   ANGLE_ARC_RATIO: 0.3,          // arc radius relative to the shorter arm
   ANGLE_ARC_MIN_MM: 500,         // arc radius at least this (but never longer than the arms)
@@ -333,7 +332,6 @@ bindToggle("snapFaces",  onSnapChanged);
 
 bindToggle("tglContinuous");
 bindToggle("tglComponents");
-bindToggle("tglIds");
 bindToggle("tglLabels");
 bindToggle("tglMeters", () => { renderTable(); renderAngles(); });
 bindToggle("lockX");
@@ -565,9 +563,11 @@ async function drawAxes() {
   if (!localActive() || !AXIS.origin || !isOn("tglShowAxes")) return "";
 
   const S = SETTINGS, O = AXIS.origin, L = AXIS.len;
-  const is3D = AXIS.mode === "3d";
-  const axes = [["X′", AXIS.ex, L, S.COLOR_AXIS_X], ["Y′", AXIS.ey, L, S.COLOR_AXIS_Y]];
-  if (is3D) axes.push(["Z′", AXIS.ez, L * S.AXIS_Z_RATIO, S.COLOR_AXIS_Z]);
+  // the cross is drawn smaller than the stored length; the frame still uses the full L
+  const La = L * S.AXIS_DRAW_SCALE;
+  // Z′ is drawn in both UCS modes (in 2D it is the global vertical), so the direction is always visible
+  const axes = [["X′", AXIS.ex, La, S.COLOR_AXIS_X], ["Y′", AXIS.ey, La, S.COLOR_AXIS_Y],
+                ["Z′", AXIS.ez, La * S.AXIS_Z_RATIO, S.COLOR_AXIS_Z]];
 
   // plain coloured lines, the same look as the Viewer's axis gizmo
   for (const [, dir, len, color] of axes) {
@@ -581,7 +581,7 @@ async function drawAxes() {
   }
   // the label sits just past the tip, on a short leader continuing the axis
   try {
-    const gap = Math.max(L * 0.04, S.LABEL_OFFSET_MM * 2);
+    const gap = Math.max(La * 0.04, S.LABEL_OFFSET_MM * 2);
     const texts = axes.map(([text, dir, len, color]) => {
       const tip = vAdd(O, vScale(dir, len));
       return { start: pickMM(tip), end: pickMM(vAdd(tip, vScale(dir, gap))), text, color };
@@ -948,16 +948,6 @@ async function drawMarkups(A, B, du, dv, dz, d3, Bs, prime, primeZ, num) {
   const resDims = await api.markup.addMeasurementMarkups(dims);
   (resDims || []).forEach(m => { if (m.id !== undefined) ids.push(m.id); });
 
-  // ID from the table (#1, #2 …) on a short leader at the start point,
-  // so it does not cover the Viewer's own length label in the middle
-  if (isOn("tglIds")) {
-    try {
-      const up = { x: A.x, y: A.y, z: A.z + Math.max(S.LABEL_OFFSET_MM * 2, d3 * 0.06) };
-      const res = await api.markup.addTextMarkup([{ start: pickMM(A), end: pickMM(up), text: "#" + num, color: S.COLOR_ID }]);
-      (res || []).forEach(m => { if (m.id !== undefined) ids.push(m.id); });
-    } catch (e) { console.log("ID label error:", e && e.message); }
-  }
-
   if (isOn("tglLabels")) {
     const texts = [ labelAt(A, B, "3D: " + fmt(d3) + unit, S.COLOR_MAIN) ];
     if (drawComponents) {
@@ -1187,7 +1177,7 @@ async function drawAngle(P0, a, b, angle, B, num) {
     const mid = at(r * Math.cos(tm), r * Math.sin(tm));
     const out = vAdd(mid, vScale(vNorm(vSub(mid, P0)), Math.max(r * 0.15, S.LABEL_OFFSET_MM)));
     const t = await api.markup.addTextMarkup([{ start: pickMM(mid), end: pickMM(out),
-      text: (isOn("tglIds") ? "∠" + num + ": " : "") + fmtDeg(angle) + "°", color: S.COLOR_ANGLE }]);
+      text: fmtDeg(angle) + "°", color: S.COLOR_ANGLE }]);
     (t || []).forEach(m => { if (m.id !== undefined) ids.push(m.id); });
   } catch (e) { console.log("Angle label error:", e && e.message); }
   return ids;
