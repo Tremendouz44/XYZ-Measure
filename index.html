@@ -79,7 +79,7 @@
 </style>
 </head>
 <body>
-  <h1>📐 XYZ Measure <span class="muted" id="appVersion" title="If this does not match the latest version, press Ctrl+F5">v2026-10-22.1</span></h1>
+  <h1>📐 XYZ Measure <span class="muted" id="appVersion" title="If this does not match the latest version, press Ctrl+F5">v2026-10-22.2</span></h1>
   <div id="status" class="status">Connecting to 3D Viewer…</div>
 
   <div>
@@ -137,7 +137,7 @@
     <span>°</span>
   </div>
   <button id="tglLocal" class="primary tgl" aria-pressed="false" disabled>Measure in UCS</button>
-  <button id="tglShowAxes" class="primary tgl on" aria-pressed="true">Show axes &amp; frame in model</button>
+  <button id="tglShowAxes" class="primary tgl on" aria-pressed="true">Show axes in model</button>
   <div id="axisInfo" class="axis-info">No UCS – measuring in global X / Y / Z.</div>
 
   <h2>Coordinate lock</h2>
@@ -202,14 +202,11 @@ const SETTINGS = {
   MIN_COMPONENT_MM: 0.5,         // shorter components are not drawn
   MIN_AXIS_PICK_MM: 10,          // axis points must be at least this far apart (2D: in plan; 3D: also off the X' line)
   MIN_AXIS_DRAW_MM: 5000,        // drawn axes are at least this long
-  COLOR_FRAME:  { r: 255, g: 214, b: 0,   a: 255 },  // yellow - local-axes frame
   COLOR_ANGLE:  { r: 230, g: 0,   b: 178, a: 255 },  // magenta (as the Viewer's own measurements) - angle
   ANGLE_ARC_RATIO: 0.3,          // arc radius relative to the shorter arm
   ANGLE_ARC_MIN_MM: 500,         // arc radius at least this (but never longer than the arms)
   ANGLE_ARC_STEP_DEG: 5,         // arc drawn from segments of this many degrees
   DECIMALS_ANGLE: 6,
-  MIN_FRAME_MM: 20000,           // the frame is at least this big (20 m)
-  FRAME_MARGIN: 0.2,             // frame extends 20 % beyond the axes on each side
   DECIMALS_MM:  0,
   DECIMALS_M:   3,
   TOOL_NAME:    "picking",
@@ -563,7 +560,7 @@ async function drawAxes() {
   if (!localActive() || !AXIS.origin || !isOn("tglShowAxes")) return "";
 
   const S = SETTINGS, O = AXIS.origin, L = AXIS.len;
-  // the cross is drawn smaller than the stored length; the frame still uses the full L
+  // the cross is drawn smaller than the stored axis length
   const La = L * S.AXIS_DRAW_SCALE;
   // Z′ is drawn in both UCS modes (in 2D it is the global vertical), so the direction is always visible
   const axes = [["X′", AXIS.ex, La, S.COLOR_AXIS_X], ["Y′", AXIS.ey, La, S.COLOR_AXIS_Y],
@@ -590,10 +587,7 @@ async function drawAxes() {
     (res || []).forEach(m => { if (m.id !== undefined) AXIS.markupIds.push(m.id); });
   } catch (e) { console.log("Axis label error:", e && e.message); }
 
-  // frame in the X′Y′ plane – a visual sign that measuring runs in local axes
-  const note = await drawFrame(O, L);
-  if (note) setStatus(note, "error");
-  return note;
+  return "";
 }
 
 // Draws straight segments [[a,b], ...]. Tries several markup types in turn, because
@@ -619,18 +613,6 @@ async function addLines(edges, color, preferFreeline = false) {
     }
   }
   return { ids: [], errors };
-}
-
-// frame in the X′Y′ plane; returns an error text for the status box, or "" when drawn
-async function drawFrame(O, L) {
-  const S = SETTINGS;
-  const size = Math.max(L, S.MIN_FRAME_MM);
-  const lo = -size * S.FRAME_MARGIN, hi = size * (1 + S.FRAME_MARGIN);
-  const at = (u, v) => vAdd(O, vAdd(vScale(AXIS.ex, u), vScale(AXIS.ey, v)));
-  const corners = [at(lo, lo), at(hi, lo), at(hi, hi), at(lo, hi)];
-  const r = await addLines(corners.map((p, i) => [p, corners[(i + 1) % 4]]), S.COLOR_FRAME);
-  AXIS.markupIds.push(...r.ids);
-  return r.ids.length ? "" : "Frame could not be drawn (" + r.errors.join("; ") + ").";
 }
 
 async function axisChanged(msg) {
@@ -1154,6 +1136,27 @@ async function drawAngle(P0, a, b, angle, B, num) {
                      Math.hypot(a.u, a.v), Math.hypot(b.u, b.v));
   const ids = [];
 
+  // short drop lines show where off-plane points were projected from
+  const drops = [];
+  if (Math.abs(a.w) > S.MIN_COMPONENT_MM) drops.push([A1, vAdd(A1, vScale(B.ez, a.w))]);
+  if (Math.abs(b.w) > S.MIN_COMPONENT_MM) drops.push([A2, vAdd(A2, vScale(B.ez, b.w))]);
+
+  // 1) the Viewer's own angle markup: its own arc and value label in a coloured box,
+  //    the same look as the X/Y/Z dimension labels. The in-plane (projected) points
+  //    are used, so it shows the same angle as the table.
+  try {
+    const res = await api.markup.addAngleMarkups([{
+      positionX: P0.x, positionY: P0.y, positionZ: P0.z,
+      start: pickMM(A1), end: pickMM(A2), color: S.COLOR_ANGLE }]);
+    (res || []).forEach(m => { if (m && m.id !== undefined) ids.push(m.id); });
+  } catch (e) { console.log("Native angle markup failed:", e && e.message); }
+  if (ids.length) {
+    if (drops.length) ids.push(...(await addLines(drops, S.COLOR_ANGLE)).ids);
+    return ids;
+  }
+
+  // 2) fallback when the Viewer has no angle markup: arms, arc and a text label
+
   // arc from arm 1 towards arm 2 the short way round
   const t1 = Math.atan2(a.v, a.u);
   let dt = Math.atan2(b.v, b.u) - t1;
@@ -1166,10 +1169,7 @@ async function drawAngle(P0, a, b, angle, B, num) {
     arc.push([at(r * Math.cos(s0), r * Math.sin(s0)), at(r * Math.cos(s1), r * Math.sin(s1))]);
   }
 
-  const lines = [[P0, A1], [P0, A2]];
-  if (Math.abs(a.w) > S.MIN_COMPONENT_MM) lines.push([A1, vAdd(A1, vScale(B.ez, a.w))]);
-  if (Math.abs(b.w) > S.MIN_COMPONENT_MM) lines.push([A2, vAdd(A2, vScale(B.ez, b.w))]);
-  ids.push(...(await addLines(lines, S.COLOR_ANGLE)).ids);
+  ids.push(...(await addLines([[P0, A1], [P0, A2], ...drops], S.COLOR_ANGLE)).ids);
   ids.push(...(await addLines(arc, S.COLOR_ANGLE, true)).ids);
 
   try {
